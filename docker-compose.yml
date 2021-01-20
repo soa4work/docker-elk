@@ -6,49 +6,45 @@ services:
       context: elasticsearch/
       args:
         ELK_VERSION: $ELK_VERSION
+    container_name: $ELASTICSEARCH_HOST
     volumes:
-      - type: bind
-        source: ./elasticsearch/config/elasticsearch.yml
-        target: /usr/share/elasticsearch/config/elasticsearch.yml
-        read_only: true
-      - type: volume
-        source: elasticsearch
-        target: /usr/share/elasticsearch/data
+      - ./elasticsearch/config/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+      - elasticsearch:/usr/share/elasticsearch/data
     ports:
       - "9200:9200"
       - "9300:9300"
     environment:
       ES_JAVA_OPTS: "-Xmx256m -Xms256m"
-      ELASTIC_PASSWORD: changeme
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+      ELASTIC_USERNAME: ${ELASTIC_USERNAME}
+      ELASTIC_CLUSTER_NAME: ${ELASTIC_CLUSTER_NAME}
       # Use single node discovery in order to disable production mode and avoid bootstrap checks.
       # see: https://www.elastic.co/guide/en/elasticsearch/reference/current/bootstrap-checks.html
       discovery.type: single-node
     networks:
-      - elk
+      - ucni_net
 
   logstash:
     build:
       context: logstash/
       args:
         ELK_VERSION: $ELK_VERSION
+    container_name: $LOGSTASH_HOST
     volumes:
-      - type: bind
-        source: ./logstash/config/logstash.yml
-        target: /usr/share/logstash/config/logstash.yml
-        read_only: true
-      - type: bind
-        source: ./logstash/pipeline
-        target: /usr/share/logstash/pipeline
-        read_only: true
+      - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
     ports:
       - "5044:5044"
-      - "5000:5000/tcp"
-      - "5000:5000/udp"
       - "9600:9600"
     environment:
+      ELASTIC_USERNAME: ${ELASTIC_USERNAME}
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+      ELASTICSEARCH_HOST_PORT: ${ELASTICSEARCH_HOST}:${ELASTICSEARCH_PORT}
       LS_JAVA_OPTS: "-Xmx256m -Xms256m"
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_KEY: ${REDIS_KEY}
     networks:
-      - elk
+      - ucni_net
     depends_on:
       - elasticsearch
 
@@ -57,21 +53,41 @@ services:
       context: kibana/
       args:
         ELK_VERSION: $ELK_VERSION
+    container_name: $KIBANA_HOST
     volumes:
-      - type: bind
-        source: ./kibana/config/kibana.yml
-        target: /usr/share/kibana/config/kibana.yml
-        read_only: true
+      - ./kibana/config/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+    environment:
+      ELASTIC_USERNAME: ${ELASTIC_USERNAME}
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+      ELASTICSEARCH_HOST_PORT: ${ELASTICSEARCH_HOST}:${ELASTICSEARCH_PORT}
     ports:
       - "5601:5601"
     networks:
-      - elk
+      - ucni_net
     depends_on:
       - elasticsearch
 
+  filebeat:
+    build:
+      context: filebeat/
+      args:
+        ELK_VERSION: $ELK_VERSION
+    command: filebeat -e --strict.perms=false
+    container_name: $FILEBEAT_HOST
+    restart: on-failure
+    volumes:
+      - ./filebeat/config/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /home/devel/ucni-workspace/docker-developer-system/VM/srv-u01/log/unit/unit.log:/var/log/srv-u01/unit.log:ro
+    environment:
+      LOGSTASH_HOST: ${LOGSTASH_HOST}
+    networks:
+      - ucni_net
+    depends_on:
+      - logstash
+
 networks:
-  elk:
-    driver: bridge
+  ucni_net:
+    external: true
 
 volumes:
   elasticsearch:
